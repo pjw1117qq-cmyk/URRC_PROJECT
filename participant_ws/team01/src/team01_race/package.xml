@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>team01_race</name><version>0.1.0</version>
+  <description>URRC LiDAR-only participant vehicle and racing algorithm.</description>
+  <maintainer email="team01@example.com">Team 01</maintainer><license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend><depend>sensor_msgs</depend><depend>geometry_msgs</depend><depend>std_msgs</depend>
+  <exec_depend>ros_gz_bridge</exec_depend><exec_depend>launch</exec_depend><exec_depend>launch_ros</exec_depend>
+  <test_depend>ament_cmake_gtest</test_depend><test_depend>ament_cmake_pytest</test_depend><test_depend>python3-pytest</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend><test_depend>launch_testing</test_depend><test_depend>rclpy</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

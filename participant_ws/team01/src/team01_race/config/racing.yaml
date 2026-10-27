@@ -1,0 +1,60 @@
+team01_perception:
+  ros__parameters:
+    max_distance_m: 5.0
+    roi_min_deg: -90.0
+    roi_max_deg: 90.0
+
+team01_decision:
+  ros__parameters:
+    planner:
+      planning_horizon_m: 5.0
+      trajectory_spacing_m: 0.10
+      temporal_history_sec: 0.5
+      cruise_speed_mps: 3.5
+      min_path_confidence: 0.40
+      max_lateral_accel_mps2: 3.0
+      default_track_width_m: 1.5
+      min_track_width_m: 0.55
+      max_track_width_m: 4.0
+    control:
+      min_lookahead_m: 1.0
+      max_lookahead_m: 3.0
+      wheelbase_m: 0.34
+      max_steering_angle_rad: 0.55
+      heading_gain: 0.45
+      lateral_gain: 0.35
+    obstacle:
+      detection_distance_m: 5.0
+      min_vehicle_width_m: 0.12
+      max_vehicle_width_m: 0.80
+      min_vehicle_depth_m: 0.10
+      max_vehicle_depth_m: 1.20
+      confirm_frames: 3
+      vehicle_lateral_margin_m: 0.15
+      vehicle_longitudinal_margin_m: 0.30
+      ego_width_m: 0.2432
+    perception:
+      min_valid_scan_beams: 20
+      min_boundary_points: 3
+      cluster_gap_m: 0.14
+    safety:
+      sensor_timeout_sec: 0.25
+      emergency_ttc_sec: 0.6
+      caution_ttc_sec: 1.5
+      assumed_max_decel_mps2: 2.5
+
+team01_control_adapter:
+  ros__parameters:
+    control:
+      wheelbase_m: 0.34
+      steering_track_m: 0.18
+      wheel_radius_m: 0.04
+      command_rate_hz: 50.0
+      max_speed_mps: 3.5
+      max_steering_angle_rad: 0.55
+      max_accel_mps2: 1.0
+      max_decel_mps2: 2.5
+      max_steering_rate_radps: 1.5
+    safety:
+      command_timeout_sec: 0.25
+      sensor_timeout_sec: 0.25
