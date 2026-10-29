@@ -69,7 +69,7 @@ struct PlannerConfig
   double temporal_history_sec{0.5};
   // Contribution of the newly observed centerline (0.30 = 30% new, 70% history).
   double trajectory_temporal_alpha{0.30};
-  double cruise_speed_mps{5.0};
+  double cruise_speed_mps{6.0};
   double min_path_confidence{0.40};
   double max_lateral_accel_mps2{3.0};
   double default_track_width_m{1.5};

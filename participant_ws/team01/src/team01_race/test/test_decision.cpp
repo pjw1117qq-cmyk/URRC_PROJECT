@@ -44,7 +44,7 @@ TEST(PredictiveTrajectory, StraightTargetsCruiseSpeedAndZeroSteering)
   const auto result = planner.plan(boundaries(), 0.0);
   ASSERT_TRUE(result.valid);
   EXPECT_NEAR(result.official_steering_rad, 0.0, 1e-6);
-  EXPECT_NEAR(result.target_speed_mps, 5.0, 1e-6);
+  EXPECT_NEAR(result.target_speed_mps, 6.0, 1e-6);
   ASSERT_FALSE(result.trajectory.empty());
   EXPECT_NEAR(result.trajectory.back().x, 5.0, 1e-6);
 }
@@ -139,6 +139,7 @@ TEST(FeedbackStability, FilterParametersDoNotChangeStraightCruiseSpeed)
   PredictivePlanner planner(config);
   const auto result = planner.plan(boundaries(), 0.0);
   ASSERT_TRUE(result.valid);
+  EXPECT_DOUBLE_EQ(config.cruise_speed_mps, 6.0);
   EXPECT_DOUBLE_EQ(result.target_speed_mps, config.cruise_speed_mps);
 }
 

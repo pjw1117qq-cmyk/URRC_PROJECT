@@ -21,6 +21,8 @@ def rotation(r, p, y):
 
 def test_model_envelope_and_limits():
     model = ET.parse(MODEL).getroot().find("model")
+    for pose in model.iter("pose"):
+        assert len((pose.text or "").split()) == 6
     low, high = [float("inf")]*3, [float("-inf")]*3
     for link in model.findall("link"):
         lp = numbers(link.findtext("pose"))
@@ -69,6 +71,16 @@ def test_model_envelope_and_limits():
     swept_width = 2*(abs(wheel_pose[1])+swept_half_y)
     assert swept_length <= 0.55
     assert swept_width <= 0.25
+
+    visual_names = {
+        visual.attrib["name"]
+        for visual in model.find("link[@name='chassis']").findall("visual")
+    }
+    assert {
+        "lower_wedge_body", "front_hood", "front_upper_chamfer", "windshield",
+        "angular_roof", "rear_slope", "rear_upper_chamfer",
+        "left_side_panel", "right_side_panel",
+    } <= visual_names
 
 def test_lidar_is_front_mounted_and_forward_only():
     model = ET.parse(MODEL).getroot().find("model")

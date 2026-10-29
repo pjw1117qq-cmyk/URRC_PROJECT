@@ -12,7 +12,7 @@ team01_decision:
       temporal_history_sec: 0.5
       # New centerline contribution; 0.30 keeps 70% of the x-aligned previous path.
       trajectory_temporal_alpha: 0.30
-      cruise_speed_mps: 5.0
+      cruise_speed_mps: 6.0
       min_path_confidence: 0.40
       max_lateral_accel_mps2: 3.0
       default_track_width_m: 1.5
@@ -66,7 +66,7 @@ team01_control_adapter:
       steering_track_m: 0.18
       wheel_radius_m: 0.04
       command_rate_hz: 50.0
-      max_speed_mps: 5.0
+      max_speed_mps: 6.0
       max_steering_angle_rad: 0.523599
       max_accel_mps2: 1.0
       max_decel_mps2: 2.5

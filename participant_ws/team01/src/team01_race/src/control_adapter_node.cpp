@@ -35,7 +35,7 @@ public:
     rate_ = declare_parameter<double>("control.command_rate_hz", 50.0);
     command_timeout_ = declare_parameter<double>("safety.command_timeout_sec", 0.25);
     sensor_timeout_ = declare_parameter<double>("safety.sensor_timeout_sec", 0.25);
-    max_speed_ = declare_parameter<double>("control.max_speed_mps", 5.0);
+    max_speed_ = declare_parameter<double>("control.max_speed_mps", 6.0);
     max_steering_ = declare_parameter<double>("control.max_steering_angle_rad", 0.523599);
     acceleration_ = declare_parameter<double>("control.max_accel_mps2", 1.0);
     deceleration_ = declare_parameter<double>("control.max_decel_mps2", 2.5);
