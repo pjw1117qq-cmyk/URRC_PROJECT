@@ -3,7 +3,7 @@
   <model name="team01_car" canonical_link="chassis">
     <self_collide>false</self_collide>
 
-    <!-- Maximum steering envelope: about 0.421 m long, 0.243 m wide, 0.12 m high. -->
+    <!-- Maximum steering envelope: about 0.421 m long, 0.242 m wide, 0.176 m high. -->
     <link name="chassis">
       <pose>0 0 0.045 0 0 0</pose>
       <inertial>
