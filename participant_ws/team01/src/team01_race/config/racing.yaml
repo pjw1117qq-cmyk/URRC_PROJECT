@@ -10,7 +10,9 @@ team01_decision:
       planning_horizon_m: 5.0
       trajectory_spacing_m: 0.10
       temporal_history_sec: 0.5
-      cruise_speed_mps: 3.5
+      # New centerline contribution; 0.30 keeps 70% of the x-aligned previous path.
+      trajectory_temporal_alpha: 0.30
+      cruise_speed_mps: 5.0
       min_path_confidence: 0.40
       max_lateral_accel_mps2: 3.0
       default_track_width_m: 1.5
@@ -20,9 +22,23 @@ team01_decision:
       min_lookahead_m: 1.0
       max_lookahead_m: 3.0
       wheelbase_m: 0.34
-      max_steering_angle_rad: 0.55
+      max_steering_angle_rad: 0.523599
       heading_gain: 0.45
       lateral_gain: 0.35
+      curvature_alpha: 0.35
+      lookahead_alpha: 0.25
+      steering_deadband_rad: 0.01
+    straight_guard:
+      curvature_threshold: 0.20
+      heading_threshold_rad: 0.12
+      lateral_variation_m: 0.18
+      boundary_heading_difference_rad: 0.12
+      trajectory_jump_threshold_m: 0.20
+      target_jump_threshold_m: 0.25
+      curvature_spike_threshold: 0.75
+      enter_frames: 3
+      exit_frames: 2
+      path_change_confirm_frames: 2
     obstacle:
       detection_distance_m: 5.0
       min_vehicle_width_m: 0.12
@@ -50,8 +66,8 @@ team01_control_adapter:
       steering_track_m: 0.18
       wheel_radius_m: 0.04
       command_rate_hz: 50.0
-      max_speed_mps: 3.5
-      max_steering_angle_rad: 0.55
+      max_speed_mps: 5.0
+      max_steering_angle_rad: 0.523599
       max_accel_mps2: 1.0
       max_decel_mps2: 2.5
       max_steering_rate_radps: 1.5

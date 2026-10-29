@@ -7,6 +7,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/int32.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "team01_race/predictive_planner.hpp"
 
@@ -39,6 +40,36 @@ public:
     ttc_pub_ = create_publisher<std_msgs::msg::Float32>("/team01/debug/minimum_ttc", 10);
     lookahead_pub_ = create_publisher<std_msgs::msg::Float32>("/team01/debug/lookahead", 10);
     passing_pub_ = create_publisher<std_msgs::msg::String>("/team01/debug/passing_side", 10);
+    centerline_lateral_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/centerline_lateral", 10);
+    raw_trajectory_lateral_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/raw_trajectory_lateral", 10);
+    filtered_trajectory_lateral_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/filtered_trajectory_lateral", 10);
+    target_x_pub_ = create_publisher<std_msgs::msg::Float32>("/team01/debug/target_x", 10);
+    target_y_pub_ = create_publisher<std_msgs::msg::Float32>("/team01/debug/target_y", 10);
+    predicted_curvature_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/predicted_curvature", 10);
+    steering_ff_pub_ = create_publisher<std_msgs::msg::Float32>("/team01/debug/steering_ff", 10);
+    steering_fb_pub_ = create_publisher<std_msgs::msg::Float32>("/team01/debug/steering_fb", 10);
+    desired_steering_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/desired_steering", 10);
+    selected_trajectory_pub_ = create_publisher<std_msgs::msg::String>(
+      "/team01/debug/selected_trajectory", 10);
+    raw_curvature_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/raw_maximum_curvature", 10);
+    raw_target_y_pub_ = create_publisher<std_msgs::msg::Float32>(
+      "/team01/debug/raw_target_y", 10);
+    left_boundary_valid_pub_ = create_publisher<std_msgs::msg::Bool>(
+      "/team01/debug/left_boundary_valid", 10);
+    right_boundary_valid_pub_ = create_publisher<std_msgs::msg::Bool>(
+      "/team01/debug/right_boundary_valid", 10);
+    straight_guard_active_pub_ = create_publisher<std_msgs::msg::Bool>(
+      "/team01/debug/straight_guard_active", 10);
+    straight_guard_reason_pub_ = create_publisher<std_msgs::msg::String>(
+      "/team01/debug/straight_guard_reason", 10);
+    obstacle_count_pub_ = create_publisher<std_msgs::msg::Int32>(
+      "/team01/debug/confirmed_obstacle_count", 10);
     started_pub_ = create_publisher<std_msgs::msg::Bool>("/team01/debug/race_started", 10);
 
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
@@ -46,6 +77,22 @@ public:
       [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) {
         const auto frame = team01_race::extract_predictive_frame(*scan, config_);
         latest_plan_ = planner_.plan(frame, steady_seconds());
+        if (latest_plan_.straight_guard_rejected) {
+          RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 1000,
+            "[STRAIGHT_GUARD] reason=%s raw_y=%.3f filtered_y=%.3f raw_target_y=%.3f "
+            "validated_target_y=%.3f raw_curvature=%.3f validated_curvature=%.3f "
+            "trajectory=%s obstacles=%d delta_ff=%.3f delta_fb=%.3f desired=%.3f final=%.3f",
+            latest_plan_.straight_guard_reason.c_str(), latest_plan_.raw_centerline_lateral_m,
+            latest_plan_.centerline_lateral_m, latest_plan_.raw_target_y_m,
+            latest_plan_.target_y_m, latest_plan_.raw_maximum_curvature,
+            latest_plan_.predicted_curvature,
+            latest_plan_.passing_side == team01_race::PassingSide::NONE ? "CENTER" :
+            team01_race::passing_side_name(latest_plan_.passing_side),
+            latest_plan_.confirmed_obstacle_count, latest_plan_.steering_ff_rad,
+            latest_plan_.steering_fb_rad, latest_plan_.desired_internal_steering_rad,
+            latest_plan_.official_steering_rad);
+        }
         scan_received_ = true;
         last_scan_ = SteadyClock::now();
         if (race_started_) fresh_trajectory_after_start_ = latest_plan_.valid;
@@ -86,6 +133,7 @@ private:
     PARAM(planning_horizon_m, "planner.planning_horizon_m");
     PARAM(trajectory_spacing_m, "planner.trajectory_spacing_m");
     PARAM(temporal_history_sec, "planner.temporal_history_sec");
+    PARAM(trajectory_temporal_alpha, "planner.trajectory_temporal_alpha");
     PARAM(cruise_speed_mps, "planner.cruise_speed_mps");
     PARAM(min_path_confidence, "planner.min_path_confidence");
     PARAM(max_lateral_accel_mps2, "planner.max_lateral_accel_mps2");
@@ -98,6 +146,19 @@ private:
     PARAM(max_steering_angle_rad, "control.max_steering_angle_rad");
     PARAM(heading_gain, "control.heading_gain");
     PARAM(lateral_gain, "control.lateral_gain");
+    PARAM(curvature_alpha, "control.curvature_alpha");
+    PARAM(lookahead_alpha, "control.lookahead_alpha");
+    PARAM(steering_deadband_rad, "control.steering_deadband_rad");
+    PARAM(straight_curvature_threshold, "straight_guard.curvature_threshold");
+    PARAM(straight_heading_threshold_rad, "straight_guard.heading_threshold_rad");
+    PARAM(straight_lateral_variation_m, "straight_guard.lateral_variation_m");
+    PARAM(boundary_heading_difference_rad, "straight_guard.boundary_heading_difference_rad");
+    PARAM(trajectory_jump_threshold_m, "straight_guard.trajectory_jump_threshold_m");
+    PARAM(target_jump_threshold_m, "straight_guard.target_jump_threshold_m");
+    PARAM(curvature_spike_threshold, "straight_guard.curvature_spike_threshold");
+    PARAM(straight_enter_frames, "straight_guard.enter_frames");
+    PARAM(straight_exit_frames, "straight_guard.exit_frames");
+    PARAM(path_change_confirm_frames, "straight_guard.path_change_confirm_frames");
     PARAM(detection_distance_m, "obstacle.detection_distance_m");
     PARAM(min_vehicle_width_m, "obstacle.min_vehicle_width_m");
     PARAM(max_vehicle_width_m, "obstacle.max_vehicle_width_m");
@@ -158,12 +219,40 @@ private:
     number.data = static_cast<float>(latest_plan_.maximum_curvature); curvature_pub_->publish(number);
     number.data = static_cast<float>(latest_plan_.minimum_ttc_sec); ttc_pub_->publish(number);
     number.data = static_cast<float>(latest_plan_.lookahead_m); lookahead_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.centerline_lateral_m);
+    centerline_lateral_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.raw_centerline_lateral_m);
+    raw_trajectory_lateral_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.centerline_lateral_m);
+    filtered_trajectory_lateral_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.target_x_m); target_x_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.target_y_m); target_y_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.predicted_curvature);
+    predicted_curvature_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.steering_ff_rad); steering_ff_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.steering_fb_rad); steering_fb_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.desired_internal_steering_rad);
+    desired_steering_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.raw_maximum_curvature);
+    raw_curvature_pub_->publish(number);
+    number.data = static_cast<float>(latest_plan_.raw_target_y_m);
+    raw_target_y_pub_->publish(number);
     std_msgs::msg::String text;
     text.data = state; state_pub_->publish(text);
     text.data = reason; reason_pub_->publish(text);
     text.data = team01_race::passing_side_name(latest_plan_.passing_side); passing_pub_->publish(text);
+    text.data = latest_plan_.passing_side == team01_race::PassingSide::NONE ?
+      "CENTER" : std::string(team01_race::passing_side_name(latest_plan_.passing_side)) + "_PASS";
+    selected_trajectory_pub_->publish(text);
+    text.data = latest_plan_.straight_guard_reason;
+    straight_guard_reason_pub_->publish(text);
     std_msgs::msg::Bool started;
     started.data = race_started_; started_pub_->publish(started);
+    started.data = latest_plan_.left_boundary_valid; left_boundary_valid_pub_->publish(started);
+    started.data = latest_plan_.right_boundary_valid; right_boundary_valid_pub_->publish(started);
+    started.data = latest_plan_.straight_guard_active; straight_guard_active_pub_->publish(started);
+    std_msgs::msg::Int32 count;
+    count.data = latest_plan_.confirmed_obstacle_count; obstacle_count_pub_->publish(count);
   }
 
   team01_race::PlannerConfig config_;
@@ -179,8 +268,18 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr speed_pub_, steering_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr requested_speed_debug_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub_, curvature_pub_, ttc_pub_, lookahead_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr centerline_lateral_pub_, target_x_pub_, target_y_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr raw_trajectory_lateral_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr filtered_trajectory_lateral_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr predicted_curvature_pub_, steering_ff_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr steering_fb_pub_, desired_steering_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr raw_curvature_pub_, raw_target_y_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_, reason_pub_, passing_pub_;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr started_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr selected_trajectory_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr straight_guard_reason_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr started_pub_, left_boundary_valid_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr right_boundary_valid_pub_, straight_guard_active_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr obstacle_count_pub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_sub_, controller_ready_sub_, emergency_sub_;
   rclcpp::TimerBase::SharedPtr timer_;

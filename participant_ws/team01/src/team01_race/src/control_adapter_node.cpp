@@ -35,14 +35,14 @@ public:
     rate_ = declare_parameter<double>("control.command_rate_hz", 50.0);
     command_timeout_ = declare_parameter<double>("safety.command_timeout_sec", 0.25);
     sensor_timeout_ = declare_parameter<double>("safety.sensor_timeout_sec", 0.25);
-    max_speed_ = declare_parameter<double>("control.max_speed_mps", 3.5);
-    max_steering_ = declare_parameter<double>("control.max_steering_angle_rad", 0.55);
+    max_speed_ = declare_parameter<double>("control.max_speed_mps", 5.0);
+    max_steering_ = declare_parameter<double>("control.max_steering_angle_rad", 0.523599);
     acceleration_ = declare_parameter<double>("control.max_accel_mps2", 1.0);
     deceleration_ = declare_parameter<double>("control.max_decel_mps2", 2.5);
     steering_rate_ = declare_parameter<double>("control.max_steering_rate_radps", 1.5);
     if (wheelbase_ <= 0.0 || track_ <= 0.0 || radius_ <= 0.0 || rate_ <= 0.0 ||
       command_timeout_ <= 0.0 || sensor_timeout_ <= 0.0 || max_speed_ <= 0.0 ||
-      max_steering_ <= 0.0 || max_steering_ > 0.6108652382 || acceleration_ <= 0.0 ||
+      max_steering_ <= 0.0 || max_steering_ > 0.523599 || acceleration_ <= 0.0 ||
       deceleration_ <= 0.0 || steering_rate_ <= 0.0) {
       throw std::invalid_argument("invalid control configuration");
     }

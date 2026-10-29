@@ -110,6 +110,8 @@ class TestRaceStartGate(unittest.TestCase):
 
         self.spin_for(0.5, publish_scan=True)
         self.assertGreater(self.speed[-1], 0.0)
+        self.assertAlmostEqual(self.speed[-1], 5.0, delta=0.05)
+        self.assertTrue(all(abs(value) <= 0.523599 + 1e-6 for value in self.steering))
 
         self.start_pub.publish(Bool(data=False))
         self.spin_for(0.15, publish_scan=False)

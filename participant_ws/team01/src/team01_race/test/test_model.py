@@ -1,5 +1,6 @@
 import json
 import math
+import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -47,8 +48,12 @@ def test_model_envelope_and_limits():
     assert dimensions[2] <= 0.18 + 1e-9
     for joint in model.findall("joint"):
         if "steering" in joint.attrib["name"]:
-            assert max(abs(float(joint.findtext("axis/limit/lower"))),
-                       abs(float(joint.findtext("axis/limit/upper")))) <= math.radians(35)
+            assert math.isclose(
+                float(joint.findtext("axis/limit/lower")), -0.523599, abs_tol=1e-9
+            )
+            assert math.isclose(
+                float(joint.findtext("axis/limit/upper")), 0.523599, abs_tol=1e-9
+            )
 
     # Front wheel cylinders sweep around Z at full steering. Include this moving
     # geometry, rather than validating only the straight-ahead SDF pose.
@@ -84,3 +89,26 @@ def test_entry_manifest_points_to_package_assets():
     assert entry["algorithm_launch_file"] == "race.launch.py"
     team_root = ROOT.parents[1]
     assert (team_root / entry["vehicle_model_file"]).is_file()
+
+def test_practice_launch_and_helpers_are_complete():
+    launch = (ROOT / "launch" / "practice.launch.py").read_text()
+    assert 'package="ros_gz_sim"' in launch
+    assert 'executable="create"' in launch
+    assert 'default_value="monza"' in launch
+    assert 'default_value="team01"' in launch
+    assert 'default_value="0.37867"' in launch
+    assert 'default_value="-2.05604"' in launch
+    assert 'default_value="1.24353"' in launch
+    assert 'default_value="1.45738"' in launch
+    assert "gz sim" not in launch
+
+    scripts = ROOT / "scripts"
+    for name in (
+        "source_practice_env.sh",
+        "run_team01_practice.sh",
+        "check_practice_ready.sh",
+        "practice_start.sh",
+    ):
+        path = scripts / name
+        assert path.is_file()
+        assert os.access(path, os.X_OK)

@@ -67,7 +67,9 @@ struct PlannerConfig
   double planning_horizon_m{5.0};
   double trajectory_spacing_m{0.10};
   double temporal_history_sec{0.5};
-  double cruise_speed_mps{3.5};
+  // Contribution of the newly observed centerline (0.30 = 30% new, 70% history).
+  double trajectory_temporal_alpha{0.30};
+  double cruise_speed_mps{5.0};
   double min_path_confidence{0.40};
   double max_lateral_accel_mps2{3.0};
   double default_track_width_m{1.5};
@@ -76,9 +78,22 @@ struct PlannerConfig
   double min_lookahead_m{1.0};
   double max_lookahead_m{3.0};
   double wheelbase_m{0.34};
-  double max_steering_angle_rad{0.55};
+  double max_steering_angle_rad{0.523599};
   double heading_gain{0.45};
   double lateral_gain{0.35};
+  double curvature_alpha{0.35};
+  double lookahead_alpha{0.25};
+  double steering_deadband_rad{0.01};
+  double straight_curvature_threshold{0.20};
+  double straight_heading_threshold_rad{0.12};
+  double straight_lateral_variation_m{0.18};
+  double boundary_heading_difference_rad{0.12};
+  double trajectory_jump_threshold_m{0.20};
+  double target_jump_threshold_m{0.25};
+  double curvature_spike_threshold{0.75};
+  int straight_enter_frames{3};
+  int straight_exit_frames{2};
+  int path_change_confirm_frames{2};
   double detection_distance_m{5.0};
   double min_vehicle_width_m{0.12};
   double max_vehicle_width_m{0.80};
@@ -99,12 +114,21 @@ struct PlannerConfig
   {
     if (!(planning_horizon_m > 0.0 && trajectory_spacing_m > 0.0 &&
       trajectory_spacing_m <= planning_horizon_m && temporal_history_sec > 0.0 &&
+      trajectory_temporal_alpha > 0.0 && trajectory_temporal_alpha <= 1.0 &&
       cruise_speed_mps > 0.0 && min_path_confidence > 0.0 && min_path_confidence <= 1.0 &&
       max_lateral_accel_mps2 > 0.0 && default_track_width_m >= min_track_width_m &&
       default_track_width_m <= max_track_width_m && min_lookahead_m > 0.0 &&
       max_lookahead_m >= min_lookahead_m && max_lookahead_m <= planning_horizon_m &&
       wheelbase_m > 0.0 && max_steering_angle_rad > 0.0 &&
-      max_steering_angle_rad <= 0.6108652382 && detection_distance_m > 0.0 &&
+      max_steering_angle_rad <= 0.523599 && detection_distance_m > 0.0 &&
+      curvature_alpha > 0.0 && curvature_alpha <= 1.0 &&
+      lookahead_alpha > 0.0 && lookahead_alpha <= 1.0 &&
+      steering_deadband_rad >= 0.0 && steering_deadband_rad < max_steering_angle_rad &&
+      straight_curvature_threshold > 0.0 && straight_heading_threshold_rad > 0.0 &&
+      straight_lateral_variation_m > 0.0 && boundary_heading_difference_rad > 0.0 &&
+      trajectory_jump_threshold_m > 0.0 && target_jump_threshold_m > 0.0 &&
+      curvature_spike_threshold > straight_curvature_threshold && straight_enter_frames > 0 &&
+      straight_exit_frames > 0 && path_change_confirm_frames > 0 &&
       detection_distance_m <= planning_horizon_m && min_vehicle_width_m > 0.0 &&
       max_vehicle_width_m >= min_vehicle_width_m && min_vehicle_depth_m > 0.0 &&
       max_vehicle_depth_m >= min_vehicle_depth_m && obstacle_confirm_frames > 0 &&
@@ -126,6 +150,22 @@ struct Plan
   double lookahead_m{0.0};
   double maximum_curvature{0.0};
   double minimum_ttc_sec{std::numeric_limits<double>::infinity()};
+  double raw_centerline_lateral_m{0.0};
+  double centerline_lateral_m{0.0};
+  double target_x_m{0.0};
+  double target_y_m{0.0};
+  double predicted_curvature{0.0};
+  double steering_ff_rad{0.0};
+  double steering_fb_rad{0.0};
+  double desired_internal_steering_rad{0.0};
+  double raw_maximum_curvature{0.0};
+  double raw_target_y_m{0.0};
+  bool left_boundary_valid{false};
+  bool right_boundary_valid{false};
+  int confirmed_obstacle_count{0};
+  bool straight_guard_active{false};
+  bool straight_guard_rejected{false};
+  std::string straight_guard_reason{"none"};
   PassingSide passing_side{PassingSide::NONE};
   bool obstacle_confirmed{false};
   std::string reason{"trajectory_unavailable"};
@@ -206,9 +246,23 @@ inline BoundaryFrame extract_predictive_frame(
     const bool compact = group.size() >= 3 && width >= config.min_vehicle_width_m &&
       width <= config.max_vehicle_width_m && depth >= config.min_vehicle_depth_m &&
       depth <= config.max_vehicle_depth_m;
-    const bool track_interior_candidate = compact && std::abs(centroid.y) < 0.8 * config.default_track_width_m;
+    double local_left_edge = max_y;
+    double local_right_edge = min_y;
+    for (const auto & nearby : points) {
+      if (std::abs(nearby.x - centroid.x) > 0.60) continue;
+      local_left_edge = std::max(local_left_edge, nearby.y);
+      local_right_edge = std::min(local_right_edge, nearby.y);
+    }
+    const bool boundary_connected =
+      (centroid.y > 0.12 && local_left_edge - max_y < config.cluster_gap_m) ||
+      (centroid.y < -0.12 && min_y - local_right_edge < config.cluster_gap_m);
+    // A scan cluster must be in the central driving corridor, not merely inside
+    // the very broad nominal track width. Curved wall fragments become visible
+    // as compact groups, but move outside this corridor as they approach.
+    const bool track_interior_candidate = compact &&
+      std::abs(centroid.y) < 0.30 * config.default_track_width_m;
     if (track_interior_candidate && centroid.x <= config.detection_distance_m) {
-      frame.obstacle_candidates.push_back({centroid, width, depth, false});
+      frame.obstacle_candidates.push_back({centroid, width, depth, boundary_connected});
     }
     for (const auto & point : group) {
       if (point.y > 0.12) frame.left.push_back(point);
@@ -236,7 +290,6 @@ public:
       return continue_previous(now_sec, "invalid_lidar");
     }
 
-    update_obstacle_track(frame.obstacle_candidates, now_sec);
     const std::size_t count = static_cast<std::size_t>(
       std::floor(config_.planning_horizon_m / config_.trajectory_spacing_m));
     if (count < 3) return result;
@@ -245,6 +298,8 @@ public:
       sorted(frame.left) : std::vector<Point2>{};
     auto right = frame.right.size() >= static_cast<std::size_t>(config_.min_boundary_points) ?
       sorted(frame.right) : std::vector<Point2>{};
+    result.left_boundary_valid = !left.empty();
+    result.right_boundary_valid = !right.empty();
     std::vector<double> observed_widths;
     std::vector<TrajectoryPoint> path;
     path.reserve(count);
@@ -300,22 +355,16 @@ public:
       return continue_previous(now_sec, "low_trajectory_confidence");
     }
 
-    // Exponential temporal fusion makes the retained previous path represent several
-    // recent LiDAR frames over the configured history window, suppressing one-frame noise.
-    if (previous_valid_ && now_sec >= previous_time_sec_ &&
-      now_sec - previous_time_sec_ <= config_.temporal_history_sec && previous_.size() == path.size()) {
-      const double age_ratio = std::clamp(
-        (now_sec - previous_time_sec_) / config_.temporal_history_sec, 0.0, 1.0);
-      const double history_weight = 0.35 * (1.0 - age_ratio);
-      for (std::size_t i = 0; i < path.size(); ++i) {
-        path[i].y = (1.0 - history_weight) * path[i].y + history_weight * previous_[i].y;
-        path[i].clearance = (1.0 - history_weight) * path[i].clearance +
-          history_weight * previous_[i].clearance;
-      }
-    }
-
     smooth(path);
+    result.raw_centerline_lateral_m = path_y_at(path, config_.min_lookahead_m);
+    temporal_smooth_centerline(path, now_sec);
     compute_geometry(path);
+    update_obstacle_track(
+      track_interior_obstacles(frame.obstacle_candidates, path), now_sec);
+    result.confirmed_obstacle_count = obstacle_.active &&
+      obstacle_.confirmations >= config_.obstacle_confirm_frames ? 1 : 0;
+    validate_straight_path(path, left, right, result);
+    const auto stable_centerline = path;
     apply_confirmed_obstacle(path, frame, result);
     compute_geometry(path);
     finish_control(path, result);
@@ -325,6 +374,9 @@ public:
 
     if (!result.emergency_stop) {
       previous_ = path;
+      previous_centerline_ = stable_centerline;
+      previous_centerline_time_sec_ = now_sec;
+      previous_centerline_valid_ = true;
       previous_time_sec_ = now_sec;
       previous_valid_ = true;
       previous_speed_mps_ = result.target_speed_mps;
@@ -341,6 +393,18 @@ private:
     double closing_speed_mps{0.0};
     int confirmations{0};
     bool active{false};
+  };
+
+  struct PathEvidence
+  {
+    double maximum_curvature{0.0};
+    double maximum_heading{0.0};
+    double coarse_curvature{0.0};
+    double coarse_heading_change{0.0};
+    double lateral_variation{0.0};
+    double reference_y{0.0};
+    double target_y{0.0};
+    double signed_peak_curvature{0.0};
   };
 
   static std::vector<Point2> sorted(std::vector<Point2> points)
@@ -370,6 +434,173 @@ private:
     if (b.x - a.x > 0.8) return std::nullopt;
     const double ratio = (x - a.x) / std::max(1e-6, b.x - a.x);
     return a.y + ratio * (b.y - a.y);
+  }
+
+  static std::optional<TrajectoryPoint> interpolate_trajectory(
+    const std::vector<TrajectoryPoint> & path, double x)
+  {
+    if (path.empty() || x < path.front().x || x > path.back().x) return std::nullopt;
+    const auto upper = std::lower_bound(path.begin(), path.end(), x,
+      [](const TrajectoryPoint & point, double value) {return point.x < value;});
+    if (upper == path.begin()) return *upper;
+    if (upper == path.end()) return path.back();
+    const auto & b = *upper;
+    const auto & a = *(upper - 1);
+    const double ratio = (x - a.x) / std::max(1e-6, b.x - a.x);
+    TrajectoryPoint sample;
+    sample.x = x;
+    sample.y = a.y + ratio * (b.y - a.y);
+    sample.clearance = a.clearance + ratio * (b.clearance - a.clearance);
+    return sample;
+  }
+
+  PathEvidence path_evidence(const std::vector<TrajectoryPoint> & path) const
+  {
+    PathEvidence evidence;
+    if (path.empty()) return evidence;
+    double minimum_y = path.front().y;
+    double maximum_y = path.front().y;
+    for (const auto & point : path) {
+      minimum_y = std::min(minimum_y, point.y);
+      maximum_y = std::max(maximum_y, point.y);
+      evidence.maximum_heading = std::max(evidence.maximum_heading, std::abs(point.heading));
+      if (std::abs(point.curvature) > evidence.maximum_curvature) {
+        evidence.maximum_curvature = std::abs(point.curvature);
+        evidence.signed_peak_curvature = point.curvature;
+      }
+    }
+    const double y1 = path_y_at(path, 1.0);
+    const double y2 = path_y_at(path, 2.0);
+    const double y3 = path_y_at(path, 3.0);
+    const double heading_12 = std::atan2(y2 - y1, 1.0);
+    const double heading_23 = std::atan2(y3 - y2, 1.0);
+    evidence.coarse_curvature = std::abs(heading_23 - heading_12);
+    evidence.coarse_heading_change = std::max(std::abs(heading_12), std::abs(heading_23));
+    evidence.lateral_variation = std::max({y1, y2, y3}) - std::min({y1, y2, y3});
+    evidence.reference_y = path_y_at(path, config_.min_lookahead_m);
+    const double target_x = control_filter_initialized_ ?
+      filtered_lookahead_m_ : config_.max_lookahead_m;
+    evidence.target_y = path_y_at(path, target_x);
+    return evidence;
+  }
+
+  bool boundaries_direction_consistent(
+    const std::vector<Point2> & left, const std::vector<Point2> & right) const
+  {
+    if (left.size() < static_cast<std::size_t>(config_.min_boundary_points) ||
+      right.size() < static_cast<std::size_t>(config_.min_boundary_points)) {
+      return false;
+    }
+    const double left_heading = std::atan2(
+      left.back().y - left.front().y, std::max(1e-6, left.back().x - left.front().x));
+    const double right_heading = std::atan2(
+      right.back().y - right.front().y, std::max(1e-6, right.back().x - right.front().x));
+    return std::abs(left_heading - right_heading) <= config_.boundary_heading_difference_rad;
+  }
+
+  void validate_straight_path(
+    std::vector<TrajectoryPoint> & path, const std::vector<Point2> & left,
+    const std::vector<Point2> & right, Plan & result)
+  {
+    const PathEvidence current = path_evidence(path);
+    result.raw_maximum_curvature = current.maximum_curvature;
+    result.raw_target_y_m = current.target_y;
+    const bool confirmed_obstacle = obstacle_.active &&
+      obstacle_.confirmations >= config_.obstacle_confirm_frames;
+    const bool boundaries_consistent = boundaries_direction_consistent(left, right);
+    const bool straight_evidence = boundaries_consistent && !confirmed_obstacle &&
+      current.coarse_curvature <= config_.straight_curvature_threshold &&
+      current.coarse_heading_change <= config_.straight_heading_threshold_rad &&
+      current.lateral_variation <= config_.straight_lateral_variation_m;
+
+    result.straight_guard_active = straight_guard_active_;
+    if (!previous_centerline_valid_ || confirmed_obstacle) {
+      pending_path_change_frames_ = 0;
+      pending_path_change_direction_ = 0;
+      update_straight_hysteresis(straight_evidence);
+      result.straight_guard_active = straight_guard_active_;
+      return;
+    }
+
+    const PathEvidence previous = path_evidence(previous_centerline_);
+    const double trajectory_jump = std::abs(current.reference_y - previous.reference_y);
+    const double target_jump = std::abs(current.target_y - previous.target_y);
+    std::string rejection_reason;
+    if (straight_guard_active_ && trajectory_jump > config_.trajectory_jump_threshold_m) {
+      rejection_reason = "trajectory_jump";
+    } else if (straight_guard_active_ &&
+      current.maximum_curvature > config_.curvature_spike_threshold) {
+      rejection_reason = "curvature_spike";
+    } else if (straight_guard_active_ && target_jump > config_.target_jump_threshold_m) {
+      rejection_reason = "target_jump";
+    }
+
+    if (!rejection_reason.empty()) {
+      double signed_change = current.reference_y - previous.reference_y;
+      if (std::abs(signed_change) < 1e-6) signed_change = current.signed_peak_curvature;
+      const int direction = signed_change >= 0.0 ? 1 : -1;
+      if (direction == pending_path_change_direction_) {
+        ++pending_path_change_frames_;
+      } else {
+        pending_path_change_direction_ = direction;
+        pending_path_change_frames_ = 1;
+      }
+      const bool curve_transition_evidence = boundaries_consistent &&
+        (current.coarse_curvature > config_.straight_curvature_threshold ||
+        current.coarse_heading_change > config_.straight_heading_threshold_rad);
+      if (pending_path_change_frames_ < config_.path_change_confirm_frames ||
+        !curve_transition_evidence)
+      {
+        pending_path_change_frames_ = std::min(
+          pending_path_change_frames_, config_.path_change_confirm_frames);
+        path = previous_centerline_;
+        result.straight_guard_rejected = true;
+        result.straight_guard_reason = rejection_reason;
+        result.straight_guard_active = true;
+        return;
+      }
+      straight_guard_active_ = false;
+      straight_enter_count_ = 0;
+      straight_exit_count_ = 0;
+    } else {
+      pending_path_change_frames_ = 0;
+      pending_path_change_direction_ = 0;
+      update_straight_hysteresis(straight_evidence);
+    }
+    result.straight_guard_active = straight_guard_active_;
+  }
+
+  void update_straight_hysteresis(bool straight_evidence)
+  {
+    if (straight_evidence) {
+      straight_exit_count_ = 0;
+      straight_enter_count_ = std::min(straight_enter_count_ + 1, config_.straight_enter_frames);
+      if (straight_enter_count_ >= config_.straight_enter_frames) straight_guard_active_ = true;
+      return;
+    }
+    straight_enter_count_ = 0;
+    if (!straight_guard_active_) return;
+    straight_exit_count_ = std::min(straight_exit_count_ + 1, config_.straight_exit_frames);
+    if (straight_exit_count_ >= config_.straight_exit_frames) {
+      straight_guard_active_ = false;
+      straight_exit_count_ = 0;
+    }
+  }
+
+  void temporal_smooth_centerline(std::vector<TrajectoryPoint> & path, double now_sec) const
+  {
+    if (!previous_centerline_valid_ || now_sec < previous_centerline_time_sec_ ||
+      now_sec - previous_centerline_time_sec_ > config_.temporal_history_sec) {
+      return;
+    }
+    const double new_weight = config_.trajectory_temporal_alpha;
+    const double previous_weight = 1.0 - new_weight;
+    for (auto & point : path) {
+      const auto previous = interpolate_trajectory(previous_centerline_, point.x);
+      if (!previous) continue;
+      point.y = previous_weight * previous->y + new_weight * point.y;
+      point.clearance = previous_weight * previous->clearance + new_weight * point.clearance;
+    }
   }
 
   static void fill_unobserved(std::vector<TrajectoryPoint> & path)
@@ -481,6 +712,31 @@ private:
     obstacle_.active = true;
   }
 
+  std::vector<Cluster> track_interior_obstacles(
+    const std::vector<Cluster> & candidates,
+    const std::vector<TrajectoryPoint> & current_centerline) const
+  {
+    std::vector<Cluster> interior;
+    interior.reserve(candidates.size());
+    for (const auto & candidate : candidates) {
+      // A compact wall fragment can satisfy the vehicle size test.  Validate the
+      // cluster against the previously accepted centerline before allowing it to
+      // accumulate obstacle confirmations.  On the first frame use a conservative
+      // centre corridor; one frame later the normal track-interior test applies.
+      const bool have_reference = previous_centerline_valid_ && !previous_centerline_.empty();
+      const auto & reference = have_reference ? previous_centerline_ : current_centerline;
+      const double reference_y = path_y_at(reference, candidate.centroid.x);
+      const double edge_clearance = config_.ego_width_m / 2.0 +
+        config_.vehicle_lateral_margin_m;
+      const double interior_half_width = std::max(
+        0.0, estimated_track_width_ / 2.0 - candidate.width / 2.0 - edge_clearance);
+      if (std::abs(candidate.centroid.y - reference_y) <= interior_half_width) {
+        interior.push_back(candidate);
+      }
+    }
+    return interior;
+  }
+
   double path_y_at(const std::vector<TrajectoryPoint> & path, double x) const
   {
     const auto it = std::min_element(path.begin(), path.end(), [x](const auto & a, const auto & b) {
@@ -547,7 +803,7 @@ private:
     }
   }
 
-  void finish_control(const std::vector<TrajectoryPoint> & path, Plan & result) const
+  void finish_control(const std::vector<TrajectoryPoint> & path, Plan & result)
   {
     result.maximum_curvature = 0.0;
     for (const auto & point : path) {
@@ -555,9 +811,22 @@ private:
         result.maximum_curvature = std::max(result.maximum_curvature, std::abs(point.curvature));
       }
     }
-    const double curve_ratio = std::clamp(result.maximum_curvature / 0.45, 0.0, 1.0);
-    result.lookahead_m = config_.max_lookahead_m -
+    if (!control_filter_initialized_) {
+      filtered_lookahead_curvature_ = result.maximum_curvature;
+    } else {
+      filtered_lookahead_curvature_ = config_.curvature_alpha * result.maximum_curvature +
+        (1.0 - config_.curvature_alpha) * filtered_lookahead_curvature_;
+    }
+    const double curve_ratio = std::clamp(filtered_lookahead_curvature_ / 0.45, 0.0, 1.0);
+    const double calculated_lookahead = config_.max_lookahead_m -
       curve_ratio * (config_.max_lookahead_m - config_.min_lookahead_m);
+    if (!control_filter_initialized_) {
+      filtered_lookahead_m_ = calculated_lookahead;
+    } else {
+      filtered_lookahead_m_ = config_.lookahead_alpha * calculated_lookahead +
+        (1.0 - config_.lookahead_alpha) * filtered_lookahead_m_;
+    }
+    result.lookahead_m = filtered_lookahead_m_;
     const auto target = std::min_element(path.begin(), path.end(), [this, &result](const auto & a, const auto & b) {
       return std::abs(a.x - result.lookahead_m) < std::abs(b.x - result.lookahead_m);
     });
@@ -571,8 +840,15 @@ private:
       weight += w;
     }
     future_curvature = weight > 0.0 ? future_curvature / weight : target->curvature;
-    const double predicted_curvature = 0.65 * target->curvature + 0.35 * future_curvature;
-    const double feed_forward = std::atan(config_.wheelbase_m * predicted_curvature);
+    const double raw_predicted_curvature = 0.65 * target->curvature + 0.35 * future_curvature;
+    if (!control_filter_initialized_) {
+      filtered_predicted_curvature_ = raw_predicted_curvature;
+      control_filter_initialized_ = true;
+    } else {
+      filtered_predicted_curvature_ = config_.curvature_alpha * raw_predicted_curvature +
+        (1.0 - config_.curvature_alpha) * filtered_predicted_curvature_;
+    }
+    const double feed_forward = std::atan(config_.wheelbase_m * filtered_predicted_curvature_);
     const double feedback = config_.heading_gain * target->heading +
       config_.lateral_gain * target->y / std::max(0.2, result.lookahead_m);
     double passing_anticipation = 0.0;
@@ -585,7 +861,17 @@ private:
           lateral_goal->y, std::max(0.5, lateral_goal->x));
       }
     }
-    const double internal_left_positive = feed_forward + feedback + passing_anticipation;
+    const double unfiltered_internal_steering = feed_forward + feedback + passing_anticipation;
+    const double internal_left_positive =
+      std::abs(unfiltered_internal_steering) <= config_.steering_deadband_rad ?
+      0.0 : unfiltered_internal_steering;
+    result.centerline_lateral_m = path_y_at(path, config_.min_lookahead_m);
+    result.target_x_m = target->x;
+    result.target_y_m = target->y;
+    result.predicted_curvature = filtered_predicted_curvature_;
+    result.steering_ff_rad = feed_forward;
+    result.steering_fb_rad = feedback;
+    result.desired_internal_steering_rad = internal_left_positive;
     result.official_steering_rad = std::clamp(
       -internal_left_positive, -config_.max_steering_angle_rad, config_.max_steering_angle_rad);
 
@@ -617,6 +903,8 @@ private:
     const double age = now_sec - previous_time_sec_;
     if (age < 0.0 || age > config_.temporal_history_sec) {
       previous_valid_ = false;
+      previous_centerline_valid_ = false;
+      control_filter_initialized_ = false;
       result.reason = reason;
       return result;
     }
@@ -641,9 +929,21 @@ private:
   PlannerConfig config_;
   double estimated_track_width_;
   std::vector<TrajectoryPoint> previous_;
+  std::vector<TrajectoryPoint> previous_centerline_;
   double previous_time_sec_{0.0};
+  double previous_centerline_time_sec_{0.0};
   double previous_speed_mps_{0.0};
   bool previous_valid_{false};
+  bool previous_centerline_valid_{false};
+  bool control_filter_initialized_{false};
+  double filtered_lookahead_curvature_{0.0};
+  double filtered_predicted_curvature_{0.0};
+  double filtered_lookahead_m_{0.0};
+  bool straight_guard_active_{false};
+  int straight_enter_count_{0};
+  int straight_exit_count_{0};
+  int pending_path_change_frames_{0};
+  int pending_path_change_direction_{0};
   ObstacleTrack obstacle_;
 };
 }  // namespace team01_race
